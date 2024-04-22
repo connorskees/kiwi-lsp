@@ -1,7 +1,7 @@
 {
 	"name": "kiwi-lsp-server",
 	"description": "Implementation of LSP server for kiwi.",
-	"version": "1.0.0",
+	"version": "1.0.2",
 	"author": "Connor Skees",
 	"license": "MIT",
 	"engines": {

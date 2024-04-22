@@ -319,13 +319,13 @@ function verify(root: Schema): KiwiParseError[] {
 			const duplicateValue = checkedFields.find(f => f.value === field.value);
 			let fieldError;
 			if (duplicateValue) {
-				fieldError = createError('The id for field ' + quote(field.name) + ' is used twice', field.valueSpan, { message: "Also used here", span: duplicateValue.valueSpan });
+				fieldError = createError('The id for field ' + quote(field.name) + ' is used twice', field.valueSpan, { message: "Also used here", span: duplicateValue.valueSpan }, "invalid id");
 			}
 			if (field.value <= 0) {
-				fieldError = createError('The id for field ' + quote(field.name) + ' must be positive', field.valueSpan);
+				fieldError = createError('The id for field ' + quote(field.name) + ' must be positive', field.valueSpan, undefined, "invalid id");
 			}
 			if (field.value > fields.length) {
-				fieldError = createError('The id for field ' + quote(field.name) + ' cannot be larger than ' + fields.length, field.valueSpan);
+				fieldError = createError('The id for field ' + quote(field.name) + ' cannot be larger than ' + fields.length, field.valueSpan, undefined, "invalid id");
 			}
 
 			if (fieldError) {

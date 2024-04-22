@@ -4,8 +4,11 @@ export function quote(text: string): string {
 	return JSON.stringify(text);
 }
 
+
+type ErrorKind = "invalid id";
+
 export class KiwiParseError extends Error {
-	constructor(message: string, public readonly range: Range, public readonly relatedInformation?: RelatedInformation) {
+	constructor(message: string, public readonly range: Range, public readonly relatedInformation?: RelatedInformation, public readonly errorKind?: ErrorKind) {
 		super(message);
 	}
 }
@@ -48,8 +51,8 @@ export function error(text: string, range: Range, relatedInformation?: RelatedIn
 	throw new KiwiParseError(text, range, relatedInformation);
 }
 
-export function createError(text: string, range: Range, relatedInformation?: RelatedInformation): KiwiParseError {
-	return new KiwiParseError(text, range, relatedInformation);
+export function createError(text: string, range: Range, relatedInformation?: RelatedInformation, errorKind?: ErrorKind): KiwiParseError {
+	return new KiwiParseError(text, range, relatedInformation, errorKind);
 }
 
 export function isPascalCase(s: string): boolean {

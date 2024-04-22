@@ -29,6 +29,10 @@ import {
 	DocumentSymbol,
 	SymbolKind,
 	DiagnosticTag,
+	CodeActionParams,
+	CodeActionKind,
+	CodeAction,
+	TextEdit,
 } from 'vscode-languageserver/node';
 
 import {
@@ -73,6 +77,10 @@ connection.onInitialize((params: InitializeParams) => {
 			definitionProvider: true,
 			referencesProvider: true,
 			documentSymbolProvider: true,
+			codeActionProvider: {
+				codeActionKinds: [CodeActionKind.QuickFix],
+				resolveProvider: true,
+			}
 		}
 	};
 	if (hasWorkspaceFolderCapability) {
@@ -126,7 +134,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			}, e.relatedInformation.message)
 		] : undefined,
 		severity: DiagnosticSeverity.Error,
-		source: 'kiwi'
+		source: 'kiwi',
+		data: e.errorKind,
 	}));
 
 	for (const e of errors) {
@@ -137,6 +146,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				relatedInformation: [DiagnosticRelatedInformation.create({ uri: textDocument.uri, range: e.range }, "Duplicated here")],
 				severity: DiagnosticSeverity.Hint,
 				source: 'kiwi',
+				data: "invalid id"
 			});
 		}
 	}
@@ -444,6 +454,53 @@ connection.onDocumentSymbol((params: DocumentSymbolParams): DocumentSymbol[] => 
 	}
 
 	return symbols;
+});
+
+function getNextId(def: KiwiDefinition): number | undefined {
+	if (def.kind !== 'MESSAGE') {
+		return;
+	}
+
+	const usedIds = new Set(def.fields.map(f => f.value));
+
+	for (let i = 1; i < def.fields.length; i++) {
+		if (!usedIds.has(i)) {
+			return i;
+		}
+	}
+
+	return def.fields.length;
+}
+
+connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
+	const diagnostics = params.context.diagnostics.filter(d => d.data === "invalid id")
+
+	if (diagnostics.length === 0) {
+		return [];
+	}
+
+	const schema = getSchema(params.textDocument.uri);
+
+	if (!schema) {
+		return [];
+	}
+
+	const def = findContainingDefinition(params.range.start, schema);
+
+	if (!def || def.kind !== 'MESSAGE') {
+		return [];
+	}
+
+	return [{
+		title: 'use next available id',
+		kind: CodeActionKind.QuickFix,
+		diagnostics,
+		edit: {
+			changes: {
+				[params.textDocument.uri]: [TextEdit.replace(diagnostics[0].range, `${getNextId(def)}`)],
+			}
+		}
+	}]
 });
 
 // This handler provides the initial list of the completion items.
