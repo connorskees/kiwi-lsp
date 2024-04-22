@@ -28,6 +28,7 @@ import {
 	DocumentSymbolParams,
 	DocumentSymbol,
 	SymbolKind,
+	DiagnosticTag,
 } from 'vscode-languageserver/node';
 
 import {
@@ -35,7 +36,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 
-import { nativeTypes, parseSchema } from './parser';
+import { nativeTypes, parseSchema, tokenize } from './parser';
 import { Schema, Definition as KiwiDefinition, Field, Token } from './schema';
 import { KiwiParseError, combineRanges, isCamelCase, isInsideRange, isPascalCase, isScreamingSnakeCase } from './util';
 
@@ -98,7 +99,7 @@ documents.onDidChangeContent(change => {
 	validateTextDocument(change.document);
 });
 
-const files: Record<string, { parsed: Schema, tokens: Token[] }> = {}
+const files: Record<string, Schema> = {};
 
 async function validateTextDocument(textDocument: TextDocument): Promise<Diagnostic[]> {
 	const text = textDocument.getText();
@@ -107,8 +108,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	let errors: KiwiParseError[] = [];
 
 	try {
-		const [parsed, tokens, validateErrors] = parseSchema(text);
-		files[textDocument.uri] = { parsed, tokens };
+		const [parsed, validateErrors] = parseSchema(text);
+		files[textDocument.uri] = parsed;
 		schema = parsed;
 		errors = validateErrors;
 	} catch (e: any) {
@@ -126,7 +127,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		] : undefined,
 		severity: DiagnosticSeverity.Error,
 		source: 'kiwi'
-	}))
+	}));
 
 	for (const e of errors) {
 		if (e.relatedInformation && hasDiagnosticRelatedInformationCapability) {
@@ -135,8 +136,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				range: e.relatedInformation.span,
 				relatedInformation: [DiagnosticRelatedInformation.create({ uri: textDocument.uri, range: e.range }, "Duplicated here")],
 				severity: DiagnosticSeverity.Hint,
-				source: 'kiwi'
-			})
+				source: 'kiwi',
+			});
 		}
 	}
 
@@ -163,6 +164,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			}
 		} else {
 			for (const field of def.fields) {
+				if (field.isDeprecated) {
+					diagnostics.push({
+						message: 'field deprecated',
+						range: field.nameSpan,
+						tags: [DiagnosticTag.Deprecated],
+						severity: DiagnosticSeverity.Hint,
+						source: 'kiwi'
+					});
+				}
+
 				if (!isCamelCase(field.name)) {
 					diagnostics.push({
 						message: "field names should be camelCase",
@@ -187,10 +198,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	return diagnostics;
 }
 
-connection.onDidChangeWatchedFiles(_change => {
-	// Monitored files have change in VSCode
-	connection.console.log('We received a file change event');
-});
+connection.onDidChangeWatchedFiles(_change => { });
 
 const PRIMITIVE_TYPE_DOCS: Record<string, string> = {
 	'bool': 'A value that stores either true or false',
@@ -207,27 +215,24 @@ const KEYWORD_DOCS: Record<string, string> = {
 	'enum': '',
 	'struct': 'An object whose fields are required. More space efficient than a message, but should be used sparingly due to back-compat.',
 	'message': 'An object whose fields are optional. The default structure in a kiwi document.'
-}
+};
 
-function getSchema(uri: string): { parsed: Schema; tokens: Token[] } | undefined {
-	if (files[uri]) {
-		return files[uri];
-	}
-
+function getSchema(uri: string): Schema | undefined {
 	try {
 		const document = documents.get(uri);
-		const [parsed, tokens, errors] = parseSchema(document?.getText()!);
-		files[uri] = { parsed, tokens };
-		return files[uri];
+		const [parsed, errors] = parseSchema(document!.getText());
+		files[uri] = parsed;
 	} catch {
-		return undefined;
+		//
 	}
+
+	return files[uri];
 }
 
 connection.onReferences((params: ReferenceParams): Location[] => {
-	const locs: Location[] = []
+	const locs: Location[] = [];
 
-	const schema = getSchema(params.textDocument.uri)?.parsed;
+	const schema = getSchema(params.textDocument.uri);
 
 	if (!schema) {
 		return [];
@@ -239,7 +244,7 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 	for (const def of schema.definitions) {
 		if (isInsideRange(params.position, def.nameSpan)) {
 			target = def.name;
-			targetLoc = { uri: params.textDocument.uri, range: def.nameSpan }
+			targetLoc = { uri: params.textDocument.uri, range: def.nameSpan };
 			break;
 		}
 
@@ -251,7 +256,7 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 			for (const field of def.fields) {
 				if (isInsideRange(params.position, field.typeSpan)) {
 					target = field.type;
-					targetLoc = { uri: params.textDocument.uri, range: field.typeSpan! }
+					targetLoc = { uri: params.textDocument.uri, range: field.typeSpan! };
 					// if (PRIMITIVE_TYPE_DOCS[field.type!]) {
 					// 	return { contents: `(builtin) ${PRIMITIVE_TYPE_DOCS[field.type!]}`, range: field.typeSpan };
 					// }
@@ -277,13 +282,13 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 				locs.push({
 					uri: params.textDocument.uri,
 					range: field.typeSpan!,
-				})
+				});
 			}
 		}
 	}
 
 	if (params.context.includeDeclaration) {
-		locs.push(targetLoc!)
+		locs.push(targetLoc!);
 	}
 
 	return locs;
@@ -298,19 +303,27 @@ function findContainingField(position: Position, schema: Schema): Field | undefi
 }
 
 connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
-	const schema = getSchema(params.textDocument.uri)?.parsed;
+	const schema = getSchema(params.textDocument.uri);
 
 	if (!schema) {
 		return { contents: [] };
 	}
 
-	const formatForDef = (def: KiwiDefinition): string[] => [
-		`(${def.kind.toLowerCase()}) ${def.name}`,
-		def.fields.length > 3
-			? `${def.fields.length} ${def.kind === 'ENUM' ? 'variants' : 'fields'
-			} | next id ${def.kind === 'ENUM' ? def.fields.length : def.fields.length + 1}`
-			: null
-	].filter((s): s is string => !!s)
+	const formatForDef = (def: KiwiDefinition): string[] => {
+		const notes = [`(${def.kind.toLowerCase()}) ${def.name}`];
+
+		if (def.fields.length <= 3) {
+			return notes;
+		}
+
+		if (def.kind === 'ENUM') {
+			notes.push(`${def.fields.length} variants`);
+		} else {
+			notes.push(`${def.fields.length} fields | next id ${def.fields.length + 1}`);
+		}
+
+		return notes;
+	};
 
 	const def = findContainingDefinition(params.position, schema);
 
@@ -350,15 +363,15 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 		const def = schema.definitions.find(def => def.name === target?.type);
 
 		if (def) {
-			return { contents: `(${def.kind.toLowerCase()}) ${def.name}`, range: target.typeSpan }
+			return { contents: `(${def.kind.toLowerCase()}) ${def.name}`, range: target.typeSpan };
 		}
 	}
 
 	return { contents: [] };
-})
+});
 
 connection.onDefinition((params: DefinitionParams): Definition | undefined => {
-	const schema = getSchema(params.textDocument.uri)?.parsed;
+	const schema = getSchema(params.textDocument.uri);
 
 	if (!schema) {
 		return;
@@ -401,9 +414,18 @@ connection.onDocumentSymbol((params: DocumentSymbolParams): DocumentSymbol[] => 
 		return [];
 	}
 
-	const symbols: DocumentSymbol[] = []
+	const symbols: DocumentSymbol[] = [];
 
-	for (const def of schema.parsed.definitions) {
+	if (schema.package) {
+		symbols.push({
+			name: schema.package.text,
+			kind: SymbolKind.Package,
+			range: schema.package.span,
+			selectionRange: schema.package.span,
+		});
+	}
+
+	for (const def of schema.definitions) {
 		symbols.push({
 			name: def.name,
 			kind: def.kind === 'ENUM' ? SymbolKind.Enum : SymbolKind.Class,
@@ -427,22 +449,19 @@ connection.onDocumentSymbol((params: DocumentSymbolParams): DocumentSymbol[] => 
 // This handler provides the initial list of the completion items.
 connection.onCompletion(
 	(textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
-		const parsed = getSchema(textDocumentPosition.textDocument.uri);
+		const schema = getSchema(textDocumentPosition.textDocument.uri);
 
-		if (!parsed) {
+		if (!schema) {
 			return [];
 		}
 
-		const schema = parsed.parsed;
-		const tokens = parsed.tokens;
-
 		const typeCompletions = [
 			...nativeTypes.map(ty => ({
-				label: ty + ' ',
+				label: ty,
 				kind: CompletionItemKind.Field,
 			})),
 			...schema.definitions.map(d => ({
-				label: d.name + ' ',
+				label: d.name,
 				kind: d.kind === 'ENUM'
 					? CompletionItemKind.Enum
 					: d.kind === 'STRUCT'
@@ -460,44 +479,42 @@ connection.onCompletion(
 			toplevelCompletions.push({
 				label: 'package ',
 				kind: CompletionItemKind.Keyword,
-			})
+			});
 		}
 
+		const docContents = documents.get(textDocumentPosition.textDocument.uri)?.getText();
+		if (!docContents) {
+			return [];
+		}
+
+		const [tokens, _] = tokenize(docContents);
+
 		for (const def of schema.definitions) {
-			const span = def.fieldsSpan;
-			if (isInsideRange(textDocumentPosition.position, span)) {
+			if (isInsideRange(textDocumentPosition.position, def.fieldsSpan)) {
 				if (def.kind === 'ENUM') {
 					return [];
 				}
 
-				// const containingField = findContainingField(textDocumentPosition.position, schema);
+				let prevTok: Token | undefined;
 
-				// if (containingField && (isInsideRange(textDocumentPosition.position, containingField.nameSpan) || isInsideRange(textDocumentPosition.position, containingField.valueSpan))) {
-				// 	return [];
-				// }
+				for (const tok of tokens) {
+					if (tok.span.end.line === textDocumentPosition.position.line && tok.span.end.character === textDocumentPosition.position.character) {
+						break;
+					}
 
-				// let prevTok: Token | undefined;
+					prevTok = tok;
+				}
 
-				// for (const tok of tokens) {
-				// 	if (tok.span.start.line > textDocumentPosition.position.line) {
-				// 		break;
-				// 	}
+				if (!prevTok || prevTok.text === ';' || prevTok.text === '{') {
+					return typeCompletions;
+				}
 
-				// 	if (tok.span.start.line === textDocumentPosition.position.line && tok.span.start.character < textDocumentPosition.position.character) {
-				// 		break;
-				// 	}
-
-				// 	prevTok = tok;
-				// }
-
-				// // const tokenIdx = tokens.findIndex(t => t.span.end.line === textDocumentPosition.position.line && t.span.end.character === textDocumentPosition.position.character);
-				// // const prevTok = tokens[tokenIdx - 1];
-				// console.log({ prevTok, pos: textDocumentPosition.position, tokens })
-				// if (!prevTok || prevTok.text === ';' || prevTok.text === '{') {
-				// 	return typeCompletions;
-				// }
-
-				return typeCompletions
+				return [
+					{
+						label: 'deprecated',
+						kind: CompletionItemKind.Keyword,
+					}
+				];
 			}
 		}
 

@@ -6,7 +6,7 @@ export function quote(text: string): string {
 
 export class KiwiParseError extends Error {
 	constructor(message: string, public readonly range: Range, public readonly relatedInformation?: RelatedInformation) {
-		super(message)
+		super(message);
 	}
 }
 
@@ -21,9 +21,9 @@ export function combineRanges(...ranges: Range[]) {
 
 	for (const r of ranges) {
 		if (r.start.line < start.line) {
-			start = { ...r.start }
+			start = { ...r.start };
 		} else if (r.start.line === start.line) {
-			start.character = Math.min(start.character, r.start.character)
+			start.character = Math.min(start.character, r.start.character);
 		}
 
 		if (r.end.line > end.line) {
@@ -33,14 +33,14 @@ export function combineRanges(...ranges: Range[]) {
 		}
 	}
 
-	return { start, end }
+	return { start, end };
 }
 
 export function endOfRange(range: Range): Range {
 	return {
 		start: { line: range.end.line, character: range.end.character },
 		end: { line: range.end.line, character: range.end.character + 1 },
-	}
+	};
 }
 
 // export function error(text: string, line: number, column: number): never;
@@ -79,7 +79,7 @@ export function isScreamingSnakeCase(s: string): boolean {
 export function isInsideRange(position: Position, range: Range | undefined): boolean {
 	if (!range || range.start.line > position.line
 		|| range.end.line < position.line) {
-		return false
+		return false;
 	}
 
 	if (range.start.line === position.line && range.end.line === position.line) {

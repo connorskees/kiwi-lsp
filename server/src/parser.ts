@@ -39,7 +39,7 @@ let messageKeyword = /^message$/;
 let packageKeyword = /^package$/;
 let deprecatedToken = /^\[deprecated\]$/;
 
-function tokenize(text: string): [Token[], KiwiParseError[]] {
+export function tokenize(text: string): [Token[], KiwiParseError[]] {
 	const errors: KiwiParseError[] = []
 
 	let parts = text.split(regex);
@@ -181,7 +181,6 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 
 			// Structs don't have explicit values
 			let value: Token | null = null;
-			let missingValue = false;
 			if (kind !== 'STRUCT') {
 				let eqError;
 				if (!eat(equals)) {
@@ -196,14 +195,12 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 					} else {
 						eqError = createError(`expected integer id. found ${quote(current().text)}`, current().span);
 					}
-					missingValue = true;
 				}
 
 				if (eqError) {
 					errors.push(eqError);
 				} else if ((+value.text | 0) + '' !== value.text) {
 					errors.push(createError('Invalid integer ' + quote(value.text), current().span));
-					missingValue = true;
 				}
 			}
 
@@ -368,9 +365,9 @@ function verify(root: Schema): KiwiParseError[] {
 	return errors;
 }
 
-export function parseSchema(text: string): [Schema, Token[], KiwiParseError[]] {
+export function parseSchema(text: string): [Schema, KiwiParseError[]] {
 	const [tokens, tokenErrors] = tokenize(text);
 	const [schema, parseErrors] = parse(tokens);
 	const validateErrors = verify(schema);
-	return [schema, tokens, [...tokenErrors, ...parseErrors, ...validateErrors]];
+	return [schema, [...tokenErrors, ...parseErrors, ...validateErrors]];
 }
