@@ -71,6 +71,7 @@ connection.onInitialize((params: InitializeParams) => {
 			hoverProvider: true,
 			definitionProvider: true,
 			referencesProvider: true,
+			documentSymbolProvider: true,
 		}
 	};
 	if (hasWorkspaceFolderCapability) {
@@ -303,6 +304,14 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 		return { contents: [] };
 	}
 
+	const formatForDef = (def: KiwiDefinition): string[] => [
+		`(${def.kind.toLowerCase()}) ${def.name}`,
+		def.fields.length > 3
+			? `${def.fields.length} ${def.kind === 'ENUM' ? 'variants' : 'fields'
+			} | next id ${def.kind === 'ENUM' ? def.fields.length : def.fields.length + 1}`
+			: null
+	].filter((s): s is string => !!s)
+
 	const def = findContainingDefinition(params.position, schema);
 
 	if (!def) {
@@ -314,7 +323,7 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 	}
 
 	if (isInsideRange(params.position, def.nameSpan)) {
-		return { contents: `(${def.kind.toLowerCase()}) ${def.name}`, range: def.nameSpan };
+		return { contents: formatForDef(def), range: def.nameSpan };
 	}
 
 	let target: Field | undefined;
@@ -333,12 +342,6 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 
 			if (isInsideRange(params.position, field.nameSpan)) {
 				break;
-				// if (def.kind === 'ENUM') {
-				// 	return { contents: `(variant) ${def.name}.${field.name}`, range: field.nameSpan }
-				// }
-
-
-				// return { contents: `(field) ${def.name}.${field.name}`, range: field.nameSpan }
 			}
 		}
 	}
@@ -347,7 +350,7 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 		const def = schema.definitions.find(def => def.name === target?.type);
 
 		if (def) {
-			return { contents: `(${def.kind.toLowerCase()}) ${def.name}` }
+			return { contents: `(${def.kind.toLowerCase()}) ${def.name}`, range: target.typeSpan }
 		}
 	}
 
