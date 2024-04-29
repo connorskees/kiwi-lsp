@@ -248,6 +248,7 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 				typeSpan: type?.span,
 				isArray: isArray,
 				isDeprecated: isDeprecated,
+				deprecatedSpan: deprecated.span,
 				value: value !== null ? +value.text | 0 : fields.length + 1,
 				valueSpan: value?.span || fullSpan,
 			});

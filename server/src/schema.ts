@@ -36,6 +36,7 @@ export interface Field {
 	typeSpan: Range | undefined;
 	isArray: boolean;
 	isDeprecated: boolean;
+	deprecatedSpan?: Range;
 	value: number;
 	valueSpan: Range;
 }

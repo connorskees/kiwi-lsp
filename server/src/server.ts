@@ -1,8 +1,3 @@
-/* --------------------------------------------------------------------------------------------
- * Copyright (c) Microsoft Corporation. All rights reserved.
- * Licensed under the MIT License. See License.txt in the project root for license information.
- * ------------------------------------------------------------------------------------------ */
-
 import {
 	createConnection,
 	TextDocuments,
@@ -42,7 +37,7 @@ import {
 
 import { nativeTypes, parseSchema, tokenize } from './parser';
 import { Schema, Definition as KiwiDefinition, Field, Token } from './schema';
-import { KiwiParseError, combineRanges, isCamelCase, isInsideRange, isPascalCase, isScreamingSnakeCase } from './util';
+import { KiwiParseError, isCamelCase, isInsideRange, isPascalCase, isScreamingSnakeCase } from './util';
 
 const connection = createConnection(ProposedFeatures.all);
 
@@ -101,11 +96,7 @@ connection.languages.diagnostics.on(async (params) => {
 	} satisfies DocumentDiagnosticReport;
 });
 
-// The content of a text document has changed. This event is emitted
-// when the text document first opened or when its content has changed.
-documents.onDidChangeContent(change => {
-	validateTextDocument(change.document);
-});
+documents.onDidChangeContent(change => validateTextDocument(change.document));
 
 const files: Record<string, Schema> = {};
 
@@ -139,16 +130,18 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	}));
 
 	for (const e of errors) {
-		if (e.relatedInformation && hasDiagnosticRelatedInformationCapability) {
-			diagnostics.push({
-				message: "First definition here",
-				range: e.relatedInformation.span,
-				relatedInformation: [DiagnosticRelatedInformation.create({ uri: textDocument.uri, range: e.range }, "Duplicated here")],
-				severity: DiagnosticSeverity.Hint,
-				source: 'kiwi',
-				data: "invalid id"
-			});
+		if (!e.relatedInformation || !hasDiagnosticRelatedInformationCapability) {
+			continue;
 		}
+
+		diagnostics.push({
+			message: "First definition here",
+			range: e.relatedInformation.span,
+			relatedInformation: [DiagnosticRelatedInformation.create({ uri: textDocument.uri, range: e.range }, "Duplicated here")],
+			severity: DiagnosticSeverity.Hint,
+			source: 'kiwi',
+			data: "invalid id"
+		});
 	}
 
 	for (const def of schema?.definitions ?? []) {
@@ -163,14 +156,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 		if (def.kind === 'ENUM') {
 			for (const field of def.fields) {
-				if (!isScreamingSnakeCase(field.name)) {
-					diagnostics.push({
-						message: `enum variants should be SCREAMING_SNAKE_CASE`,
-						range: field.nameSpan,
-						severity: DiagnosticSeverity.Warning,
-						source: 'kiwi'
-					});
+				if (isScreamingSnakeCase(field.name)) {
+					continue;
 				}
+
+				diagnostics.push({
+					message: `enum variants should be SCREAMING_SNAKE_CASE`,
+					range: field.nameSpan,
+					severity: DiagnosticSeverity.Warning,
+					source: 'kiwi'
+				});
 			}
 		} else {
 			for (const field of def.fields) {
@@ -207,8 +202,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 	return diagnostics;
 }
-
-connection.onDidChangeWatchedFiles(_change => { });
 
 const PRIMITIVE_TYPE_DOCS: Record<string, string> = {
 	'bool': 'A value that stores either true or false',
@@ -267,9 +260,6 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 				if (isInsideRange(params.position, field.typeSpan)) {
 					target = field.type;
 					targetLoc = { uri: params.textDocument.uri, range: field.typeSpan! };
-					// if (PRIMITIVE_TYPE_DOCS[field.type!]) {
-					// 	return { contents: `(builtin) ${PRIMITIVE_TYPE_DOCS[field.type!]}`, range: field.typeSpan };
-					// }
 					break;
 				}
 			}
@@ -288,17 +278,19 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 		}
 
 		for (const field of def.fields) {
-			if (field.type === target) {
-				locs.push({
-					uri: params.textDocument.uri,
-					range: field.typeSpan!,
-				});
+			if (field.type !== target) {
+				continue;
 			}
+
+			locs.push({
+				uri: params.textDocument.uri,
+				range: field.typeSpan!,
+			});
 		}
 	}
 
-	if (params.context.includeDeclaration) {
-		locs.push(targetLoc!);
+	if (params.context.includeDeclaration && targetLoc) {
+		locs.push(targetLoc);
 	}
 
 	return locs;
@@ -306,10 +298,6 @@ connection.onReferences((params: ReferenceParams): Location[] => {
 
 function findContainingDefinition(position: Position, schema: Schema): KiwiDefinition | undefined {
 	return schema.definitions.find(def => isInsideRange(position, def.defSpan));
-}
-
-function findContainingField(position: Position, schema: Schema): Field | undefined {
-	return findContainingDefinition(position, schema)?.fields.find(field => isInsideRange(position, field.span));
 }
 
 connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
@@ -361,6 +349,10 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 				target = field;
 
 				break;
+			}
+
+			if (isInsideRange(params.position, field.deprecatedSpan)) {
+				return { contents: ['deprecated fields are ignored during codegen'] }
 			}
 
 			if (isInsideRange(params.position, field.nameSpan)) {
@@ -473,7 +465,7 @@ function getNextId(def: KiwiDefinition): number | undefined {
 }
 
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
-	const diagnostics = params.context.diagnostics.filter(d => d.data === "invalid id")
+	const diagnostics = params.context.diagnostics.filter(d => d.data === "invalid id");
 
 	if (diagnostics.length === 0) {
 		return [];
@@ -500,10 +492,9 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 				[params.textDocument.uri]: [TextEdit.replace(diagnostics[0].range, `${getNextId(def)}`)],
 			}
 		}
-	}]
+	}];
 });
 
-// This handler provides the initial list of the completion items.
 connection.onCompletion(
 	(textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
 		const schema = getSchema(textDocumentPosition.textDocument.uri);
@@ -532,7 +523,10 @@ connection.onCompletion(
 			kind: CompletionItemKind.Keyword,
 		}));
 
-		if (!schema.package && (schema.definitions.length === 0 || textDocumentPosition.position.line < schema.definitions[0]!.nameSpan.start.line)) {
+		if (
+			!schema.package && (schema.definitions.length === 0
+				|| textDocumentPosition.position.line < schema.definitions[0]!.nameSpan.start.line)
+		) {
 			toplevelCompletions.push({
 				label: 'package ',
 				kind: CompletionItemKind.Keyword,
@@ -555,7 +549,10 @@ connection.onCompletion(
 				let prevTok: Token | undefined;
 
 				for (const tok of tokens) {
-					if (tok.span.end.line === textDocumentPosition.position.line && tok.span.end.character === textDocumentPosition.position.character) {
+					if (
+						tok.span.end.line === textDocumentPosition.position.line
+						&& tok.span.end.character === textDocumentPosition.position.character
+					) {
 						break;
 					}
 
@@ -579,17 +576,5 @@ connection.onCompletion(
 	}
 );
 
-// This handler resolves additional information for the item selected in
-// the completion list.
-connection.onCompletionResolve(
-	(item: CompletionItem): CompletionItem => {
-		return item;
-	}
-);
-
-// Make the text document manager listen on the connection
-// for open, change and close text document events
 documents.listen(connection);
-
-// Listen on the connection
 connection.listen();
