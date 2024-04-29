@@ -29,11 +29,13 @@ import {
 	CodeAction,
 	TextEdit,
 } from 'vscode-languageserver/node';
-
 import {
 	Position,
 	TextDocument
 } from 'vscode-languageserver-textdocument';
+import {
+	camelCase, pascalCase, constantCase
+} from 'change-case';
 
 import { nativeTypes, parseSchema, tokenize } from './parser';
 import { Schema, Definition as KiwiDefinition, Field, Token } from './schema';
@@ -61,9 +63,7 @@ connection.onInitialize((params: InitializeParams) => {
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Incremental,
-			completionProvider: {
-				resolveProvider: true
-			},
+			completionProvider: {},
 			diagnosticProvider: {
 				interFileDependencies: false,
 				workspaceDiagnostics: false
@@ -150,7 +150,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				message: `${def.kind.toLowerCase()} names should be PascalCase`,
 				range: def.nameSpan,
 				severity: DiagnosticSeverity.Warning,
-				source: 'kiwi'
+				source: 'kiwi',
+				data: { kind: "change case", newText: pascalCase(def.name) },
 			});
 		}
 
@@ -164,7 +165,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 					message: `enum variants should be SCREAMING_SNAKE_CASE`,
 					range: field.nameSpan,
 					severity: DiagnosticSeverity.Warning,
-					source: 'kiwi'
+					source: 'kiwi',
+					data: { kind: "change case", newText: constantCase(field.name) },
 				});
 			}
 		} else {
@@ -175,7 +177,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 						range: field.nameSpan,
 						tags: [DiagnosticTag.Deprecated],
 						severity: DiagnosticSeverity.Hint,
-						source: 'kiwi'
+						source: 'kiwi',
 					});
 				}
 
@@ -184,7 +186,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 						message: "field names should be camelCase",
 						range: field.nameSpan,
 						severity: DiagnosticSeverity.Warning,
-						source: 'kiwi'
+						source: 'kiwi',
+						data: { kind: "change case", newText: camelCase(field.name) },
 					});
 				}
 			}
@@ -196,7 +199,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			message: "package names should be PascalCase",
 			range: schema.package.span,
 			severity: DiagnosticSeverity.Warning,
-			source: 'kiwi'
+			source: 'kiwi',
+			data: { kind: "change case", newText: pascalCase(schema.package.text) },
 		});
 	}
 
@@ -465,7 +469,7 @@ function getNextId(def: KiwiDefinition): number | undefined {
 }
 
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
-	const diagnostics = params.context.diagnostics.filter(d => d.data === "invalid id");
+	const diagnostics = params.context.diagnostics.filter(d => !!d.data);
 
 	if (diagnostics.length === 0) {
 		return [];
@@ -479,20 +483,48 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 
 	const def = findContainingDefinition(params.range.start, schema);
 
-	if (!def || def.kind !== 'MESSAGE') {
-		return [];
+	function getNextIdQuickActions() {
+		const nextIdDiagnostics = diagnostics.filter(d => d.data === "invalid id");
+
+		if (!def || def.kind !== 'MESSAGE') {
+			return [];
+		}
+
+		return nextIdDiagnostics.map(diagnostic => ({
+			title: 'Use next available id',
+			kind: CodeActionKind.QuickFix,
+			diagnostics: [diagnostic],
+			edit: {
+				changes: {
+					[params.textDocument.uri]: [TextEdit.replace(diagnostic.range, `${getNextId(def)}`)],
+				}
+			}
+		}));
 	}
 
-	return [{
-		title: 'use next available id',
-		kind: CodeActionKind.QuickFix,
-		diagnostics,
-		edit: {
-			changes: {
-				[params.textDocument.uri]: [TextEdit.replace(diagnostics[0].range, `${getNextId(def)}`)],
-			}
+	function getChangeCaseQuickActions() {
+		const changeCaseDiagnostics = diagnostics.filter(d => d.data?.kind === "change case");
+
+		if (!def) {
+			return [];
 		}
-	}];
+
+		return changeCaseDiagnostics.map(diagnostic => ({
+			title: 'Change case',
+			kind: CodeActionKind.QuickFix,
+			diagnostics: [diagnostic],
+			edit: {
+				changes: {
+					[params.textDocument.uri]: [TextEdit.replace(diagnostic.range, diagnostic.data?.newText)],
+				}
+			}
+		}));
+	}
+
+	return [
+		...getNextIdQuickActions(),
+		...getChangeCaseQuickActions(),
+	]
 });
 
 connection.onCompletion(

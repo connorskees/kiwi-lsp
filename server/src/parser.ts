@@ -184,16 +184,16 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 			if (kind !== 'STRUCT') {
 				let eqError;
 				if (!eat(equals)) {
-					eqError = createError('expected "="', current().span);
+					eqError = createError('Expected "="', current().span);
 				}
 
 				value = current();
 
 				if (!eat(integer)) {
 					if (eqError) {
-						eqError.message = `expected id assignment. e.g. \`${type ? type.text + ' ' : ''}${field.text} = 1\``
+						eqError.message = `Expected id assignment. e.g. \`${type ? type.text + ' ' : ''}${field.text} = 1\``
 					} else {
-						eqError = createError(`expected integer id. found ${quote(current().text)}`, current().span);
+						eqError = createError(`Expected integer id. found ${quote(current().text)}`, current().span);
 					}
 				}
 
@@ -214,9 +214,9 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 			} else if (kind !== 'ENUM') {
 				let deprecatedErrorToken = null;
 				if (deprecatedErrorToken = eat(/\[|\]/)) {
-					errors.push(createError('expected `[deprecated]`', deprecatedErrorToken.span));
-				} else if (deprecatedErrorToken = eat(/\w+/)) {
-					errors.push(createError('unexpected identifier. did you mean `[deprecated]`?', deprecatedErrorToken.span));
+					errors.push(createError('Expected `[deprecated]`', deprecatedErrorToken.span));
+				} else if (deprecatedErrorToken = eat(/deprecated/)) {
+					errors.push(createError('Did you mean `[deprecated]`?', deprecatedErrorToken.span));
 				}
 			}
 
@@ -233,9 +233,15 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 				semicolonSpan = eat(semicolon)?.span;
 
 				errors.push(createError('Struct fields can\'t have explicit ids.', range));
-			} else if (!eat(semicolon)) {
+			}
+
+			if (!eat(semicolon)) {
 				const range = value?.span ?? field.span;
-				errors.push(createError('expected ";"', endOfRange(range)));
+				errors.push(createError('Expected ";"', endOfRange(range)));
+			}
+
+			if (name?.text === 'WidgetHoverStyle') {
+				console.log({ c: current() });
 			}
 
 			const fullSpan = combineRanges(field.span, type?.span || field.span, value?.span || field.span, semicolonSpan || field.span);
@@ -317,7 +323,7 @@ function verify(root: Schema): KiwiParseError[] {
 			for (let j = 0; j < fields.length; j++) {
 				let field = fields[j];
 				if (definedTypes.indexOf(field.type!) === -1) {
-					errors.push(createError('The type ' + quote(field.type!) + ' is not defined for field ' + quote(field.name), field.typeSpan!));
+					errors.push(createError('The type ' + quote(field.type!) + ' doesn\'t exist.', field.typeSpan!));
 				}
 			}
 		}

@@ -12,6 +12,7 @@
 		"url": "https://github.com/connorskees/kiwi-lsp"
 	},
 	"dependencies": {
+		"change-case": "^4",
 		"vscode-languageserver": "^9.0.1",
 		"vscode-languageserver-textdocument": "^1.0.11"
 	},
