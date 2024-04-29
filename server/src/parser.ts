@@ -1,6 +1,6 @@
-import { Range } from 'vscode-languageserver';
 import { Schema, Definition, Field, DefinitionKind, Token } from "./schema";
 import { KiwiParseError, combineRanges, createError, endOfRange, error, quote } from './util';
+import { sentenceCase } from 'change-case';
 
 export let nativeTypes = [
 	'bool',
@@ -65,7 +65,7 @@ export function tokenize(text: string): [Token[], KiwiParseError[]] {
 
 		// Detect syntax errors
 		else if (part !== '') {
-			errors.push(createError(`invalid token: ${quote(part)}`, {
+			errors.push(createError(`Invalid token: ${quote(part)}`, {
 				start: { line, character: column },
 				end: { line, character: column + part.length },
 			}))
@@ -115,19 +115,24 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 	}
 
 	let definitions: Definition[] = [];
+	let packageKeywordToken = null;
 	let packageIdent = null;
 	let index = 0;
 
-	if (eat(packageKeyword)) {
+	if (packageKeywordToken = eat(packageKeyword)) {
 		packageIdent = eat(identifier);
 
 		const packageSemi = eat(semicolon);
 		if (packageIdent) {
-			if (!packageSemi) {
-				errors.push(createError('expected ";"', endOfRange(packageIdent.span)))
+			if (packageIdent.text === 'enum' || packageIdent.text === 'struct' || packageIdent.text === 'message') {
+				errors.push(createError('Expected package name', endOfRange(packageKeywordToken.span)))
+				index -= 1;
+				packageIdent = null;
+			} else if (!packageSemi) {
+				errors.push(createError('Expected ";"', endOfRange(packageIdent.span)))
 			}
 		} else {
-			errors.push(createError('expected package name', endOfRange(current().span)))
+			errors.push(createError('Expected package name', endOfRange(current().span)))
 		}
 	}
 
@@ -141,7 +146,7 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 		else if (kindTok = eat(messageKeyword)) kind = 'MESSAGE';
 		else {
 			const tok = current();
-			errors.push(createError(`unexpected token "${tok.text}"`, tok.span));
+			errors.push(createError(`Unexpected token "${tok.text}"`, tok.span));
 			index += 1;
 			continue;
 		}
@@ -151,7 +156,7 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 
 		if (!eat(identifier)) {
 			name = null;
-			errors.push(createError(`${kind.toLowerCase()} missing name`, combineRanges(kindTok.span, current().span)));
+			errors.push(createError(`${sentenceCase(kind)} missing name`, combineRanges(kindTok.span, current().span)));
 		}
 
 		const openFieldsBrace = expect(leftBrace, '"{"');
@@ -207,10 +212,10 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 			let deprecated = current();
 			if (eat(deprecatedToken)) {
 				if (kind !== 'MESSAGE') {
-					errors.push(createError('Cannot deprecate this field', deprecated.span));
+					errors.push(createError('Can only deprecate message fields', deprecated.span));
+				} else {
+					isDeprecated = true;
 				}
-
-				isDeprecated = true;
 			} else if (kind !== 'ENUM') {
 				let deprecatedErrorToken = null;
 				if (deprecatedErrorToken = eat(/\[|\]/)) {

@@ -34,7 +34,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 import {
-	camelCase, pascalCase, constantCase
+	camelCase, pascalCase, constantCase, sentenceCase
 } from 'change-case';
 
 import { nativeTypes, parseSchema, tokenize } from './parser';
@@ -140,14 +140,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			relatedInformation: [DiagnosticRelatedInformation.create({ uri: textDocument.uri, range: e.range }, "Duplicated here")],
 			severity: DiagnosticSeverity.Hint,
 			source: 'kiwi',
-			data: "invalid id"
+			data: e.errorKind,
 		});
 	}
 
 	for (const def of schema?.definitions ?? []) {
 		if (!isPascalCase(def.name)) {
 			diagnostics.push({
-				message: `${def.kind.toLowerCase()} names should be PascalCase`,
+				message: `${sentenceCase(def.kind)} names should be PascalCase`,
 				range: def.nameSpan,
 				severity: DiagnosticSeverity.Warning,
 				source: 'kiwi',
@@ -162,7 +162,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				}
 
 				diagnostics.push({
-					message: `enum variants should be SCREAMING_SNAKE_CASE`,
+					message: `Enum variants should be SCREAMING_SNAKE_CASE`,
 					range: field.nameSpan,
 					severity: DiagnosticSeverity.Warning,
 					source: 'kiwi',
@@ -173,7 +173,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			for (const field of def.fields) {
 				if (field.isDeprecated) {
 					diagnostics.push({
-						message: 'field deprecated',
+						message: 'Field deprecated',
 						range: field.nameSpan,
 						tags: [DiagnosticTag.Deprecated],
 						severity: DiagnosticSeverity.Hint,
@@ -183,7 +183,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 				if (!isCamelCase(field.name)) {
 					diagnostics.push({
-						message: "field names should be camelCase",
+						message: "Field names should be camelCase",
 						range: field.nameSpan,
 						severity: DiagnosticSeverity.Warning,
 						source: 'kiwi',
@@ -196,7 +196,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 	if (schema?.package && !isPascalCase(schema.package.text)) {
 		diagnostics.push({
-			message: "package names should be PascalCase",
+			message: "Package names should be PascalCase",
 			range: schema.package.span,
 			severity: DiagnosticSeverity.Warning,
 			source: 'kiwi',
@@ -356,7 +356,7 @@ connection.onHover((params: HoverParams, token: CancellationToken): Hover => {
 			}
 
 			if (isInsideRange(params.position, field.deprecatedSpan)) {
-				return { contents: ['deprecated fields are ignored during codegen'] }
+				return { contents: ['Deprecated fields are ignored during codegen'] }
 			}
 
 			if (isInsideRange(params.position, field.nameSpan)) {
