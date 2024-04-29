@@ -211,6 +211,13 @@ function parse(tokens: Token[]): [Schema, KiwiParseError[]] {
 				}
 
 				isDeprecated = true;
+			} else if (kind !== 'ENUM') {
+				let deprecatedErrorToken = null;
+				if (deprecatedErrorToken = eat(/\[|\]/)) {
+					errors.push(createError('expected `[deprecated]`', deprecatedErrorToken.span));
+				} else if (deprecatedErrorToken = eat(/\w+/)) {
+					errors.push(createError('unexpected identifier. did you mean `[deprecated]`?', deprecatedErrorToken.span));
+				}
 			}
 
 			let semicolonSpan;
@@ -300,15 +307,17 @@ function verify(root: Schema): KiwiParseError[] {
 		let definition = root.definitions[i];
 		let fields = definition.fields;
 
-		if (definition.kind === 'ENUM' || fields.length === 0) {
+		if (fields.length === 0) {
 			continue;
 		}
 
-		// Check types
-		for (let j = 0; j < fields.length; j++) {
-			let field = fields[j];
-			if (definedTypes.indexOf(field.type!) === -1) {
-				errors.push(createError('The type ' + quote(field.type!) + ' is not defined for field ' + quote(field.name), field.typeSpan!));
+		if (definition.kind !== 'ENUM') {
+			// Check types
+			for (let j = 0; j < fields.length; j++) {
+				let field = fields[j];
+				if (definedTypes.indexOf(field.type!) === -1) {
+					errors.push(createError('The type ' + quote(field.type!) + ' is not defined for field ' + quote(field.name), field.typeSpan!));
+				}
 			}
 		}
 
@@ -316,15 +325,19 @@ function verify(root: Schema): KiwiParseError[] {
 		const checkedFields: Field[] = [];
 		for (let j = 0; j < fields.length; j++) {
 			let field = fields[j];
+
+			const duplicateName = checkedFields.find(f => f.name === field.name);
+			if (duplicateName) {
+				errors.push(createError('The name for field ' + quote(field.name) + ' is used twice', field.nameSpan, { message: "Also used here", span: duplicateName.nameSpan }));
+			}
+
 			const duplicateValue = checkedFields.find(f => f.value === field.value);
 			let fieldError;
 			if (duplicateValue) {
 				fieldError = createError('The id for field ' + quote(field.name) + ' is used twice', field.valueSpan, { message: "Also used here", span: duplicateValue.valueSpan }, "invalid id");
-			}
-			if (field.value <= 0) {
+			} else if ((definition.kind === 'ENUM' && field.value < 0) || (definition.kind !== 'ENUM' && field.value <= 0)) {
 				fieldError = createError('The id for field ' + quote(field.name) + ' must be positive', field.valueSpan, undefined, "invalid id");
-			}
-			if (field.value > fields.length) {
+			} else if (definition.kind !== 'ENUM' && field.value > fields.length) {
 				fieldError = createError('The id for field ' + quote(field.name) + ' cannot be larger than ' + fields.length, field.valueSpan, undefined, "invalid id");
 			}
 
